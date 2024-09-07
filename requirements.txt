@@ -1,0 +1,4 @@
+google.generativeai
+pymongo
+fuzzywuzzy
+chainlit
