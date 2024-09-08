@@ -1,5 +1,5 @@
-from curses import color_content
-from turtle import color
+# from curses import color_content
+# from turtle import color
 import chainlit as cl
 from model.llm import chatbot_response
 

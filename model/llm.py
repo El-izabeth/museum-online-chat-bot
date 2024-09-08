@@ -2,7 +2,7 @@ import google.generativeai as genai
 from pymongo import MongoClient
 from fuzzywuzzy import process  
 
-genai.configure(api_key="")
+genai.configure(api_key="AIzaSyBc0Bbh053Dzi6QZGa4gydzSK4z69RMZ8o")
 model = genai.GenerativeModel('gemini-1.5-flash')
 
 def get_database():
@@ -20,10 +20,19 @@ def classify_intent(user_input):
     return intent
 
 def extract_details(user_input, detail_type):
-    prompt = f"Extract the {detail_type} from the following input: {user_input} . Remember that you have to give only the obtained {detail_type}'s value as output, and not any sentence."
+    prompt = f"""
+    Extract the {detail_type} from the following input: {user_input}.
+    For {detail_type}, return only proper names. If the detail type is 'museum name', do not return any general phrases like 'museums in city_name' or 'museum'. 
+    If a specific name like 'XYZ Museum' cannot be found, return an empty response.
+    For example, if you have a phrase like 'museums in Delhi', the response should be empty.
+    """
     response = model.generate_content(prompt)
     extracted_detail = response.text.strip()
-    return extracted_detail
+    print(extracted_detail)
+    if "empty" in extracted_detail: return ""
+    return extracted_detail if extracted_detail.lower() != "museum" else ""
+
+
 
 def fetch_museum_details(city=None):
     query = {}
@@ -51,23 +60,24 @@ def handle_enquiry(user_input):
             matched_museum = next(museum for museum in museums if museum['name'] == matched_museum_name)
             prompt = f'''Here are the details for {matched_museum['name']} museum in {matched_museum['city']}. The available time slots are {matched_museum['time_slots']}. 
                         You have to provide details about this museum with the details provided in the prompt in a natural language like humans speak, so that the user can understand.
-                        Also while providing details do not say that you don't have additional details about the museum. Just provide the positive reply with all the details that has been provided to you.'''
+                        Also, while providing details do not say that you don't have additional details about the museum. Just provide the positive reply with all the details that has been provided to you.'''
             response = model.generate_content(prompt)
         else:
             response = "Sorry, I couldn't find a museum that closely matches your query."
     elif city:
         if museums:
             museum_list = "\n".join([museum['name'] for museum in museums])
-            prompt = f"Here are the museums available in {city}: {museum_list}."
-            response = model.generate_content(prompt)
+            response = f"The museums available in {city} are:\n{museum_list}."
         else:
             response = "Sorry, I couldn't find any museums in the city you mentioned."
     else:
         response = "Please provide more details like the museum name or city."
+    
     print(response)
-    if type(response)==str:
+    if isinstance(response, str):
         return response
     return response.text.strip()
+
 
 def handle_payment(user_input):
     museum = extract_details(user_input, "museum name")
