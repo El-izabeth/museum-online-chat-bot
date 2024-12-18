@@ -1,17 +1,45 @@
 import google.generativeai as genai
 from pymongo import MongoClient
-from fuzzywuzzy import process  
+from fuzzywuzzy import process
+from langchain.vectorstores import Pinecone as LangChainPinecone
+from langchain.embeddings import SentenceTransformerEmbeddings
+import pinecone
+from sentence_transformers import SentenceTransformer
 
-genai.configure(api_key="AIzaSyBc0Bbh053Dzi6QZGa4gydzSK4z69RMZ8o")
+genai.configure(api_key="")
 model = genai.GenerativeModel('gemini-1.5-flash')
 
 def get_database():
-    CONNECTION_STRING = "mongodb+srv://Ananth9323:ananth_2003@cluster0.wncou4e.mongodb.net/?retryWrites=true&w=majority&appName=Cluster0"
+    CONNECTION_STRING = ""
     client = MongoClient(CONNECTION_STRING)
     return client['museum']
 
 db = get_database()
 collection = db['museums']
+
+def init_pinecone():
+    PINECONE_API_KEY = "" 
+    PINECONE_ENVIRONMENT = "us-east-1-aws"  
+    pinecone.init(api_key=PINECONE_API_KEY, environment=PINECONE_ENVIRONMENT)
+    index_name = "museum-index"
+    if index_name not in pinecone.list_indexes():
+        pinecone.create_index(index_name, dimension=384)
+    return index_name
+
+def create_pinecone_index(documents, index_name):
+    embedding_model = SentenceTransformer("all-MiniLM-L6-v2")
+    texts = [
+        f"{doc['name']} located in {doc['city']} with time slots: {', '.join(doc['time_slots'])}" 
+        for doc in documents
+    ]
+    LangChainPinecone.from_texts(
+        texts=texts,
+        embedding=SentenceTransformerEmbeddings(model_name="all-MiniLM-L6-v2"),
+        index_name=index_name
+    )
+
+def fetch_all_museum_data():
+    return list(collection.find())
 
 def classify_intent(user_input):
     prompt = f". Remember that you have to give answer only in one word. It should only be either 'enquiry' or  'payment' . Classify the following user input as either 'enquiry' or 'payment': {user_input}"
@@ -32,63 +60,39 @@ def extract_details(user_input, detail_type):
     if "empty" in extracted_detail: return ""
     return extracted_detail if extracted_detail.lower() != "museum" else ""
 
-
-
-def fetch_museum_details(city=None):
-    query = {}
-    if city:
-        query['city'] = city
-    results = collection.find(query)
-    museums = [result for result in results]
-    return museums
-
-def match_museum_name(user_museum_name, museums):
-    museum_names = [museum['name'] for museum in museums]
-    closest_match = process.extractOne(user_museum_name, museum_names)
-    return closest_match[0] if closest_match else None
-
 def handle_enquiry(user_input):
-    city = extract_details(user_input, "city")
-    user_museum_name = extract_details(user_input, "museum name")
-    print(city, user_museum_name)
-    
-    museums = fetch_museum_details(city)
-    
-    if user_museum_name:
-        matched_museum_name = match_museum_name(user_museum_name, museums)
-        if matched_museum_name:
-            matched_museum = next(museum for museum in museums if museum['name'] == matched_museum_name)
-            prompt = f'''Here are the details for {matched_museum['name']} museum in {matched_museum['city']}. The available time slots are {matched_museum['time_slots']}. 
-                        You have to provide details about this museum with the details provided in the prompt in a natural language like humans speak, so that the user can understand.
-                        Also, while providing details do not say that you don't have additional details about the museum. Just provide the positive reply with all the details that has been provided to you.'''
-            response = model.generate_content(prompt)
-        else:
-            response = "Sorry, I couldn't find a museum that closely matches your query."
-    elif city:
-        if museums:
-            museum_list = "\n".join([museum['name'] for museum in museums])
-            response = f"The museums available in {city} are:\n{museum_list}."
-        else:
-            response = "Sorry, I couldn't find any museums in the city you mentioned."
-    else:
-        response = "Please provide more details like the museum name or city."
-    
-    print(response)
-    if isinstance(response, str):
-        return response
-    return response.text.strip()
+    index_name = init_pinecone()
+    documents = fetch_all_museum_data()
+    create_pinecone_index(documents, index_name)
 
+    vectorstore = LangChainPinecone(index_name=index_name, embedding_function=None)
+    
+    retrieved_docs = vectorstore.similarity_search(user_input, k=5)
+    if not retrieved_docs:
+        return "Sorry, I couldn't find any relevant information for your query."
+
+    context = "\n".join([doc["text"] for doc in retrieved_docs])
+
+    prompt = f"""
+    You are an intelligent chatbot. Based on the context provided, answer the user's question accurately and naturally.
+    Context:
+    {context}
+    
+    Question:
+    {user_input}
+    """
+    response = model.generate_content(prompt)
+    print(response.text.strip())
+    return response.text.strip()
 
 def handle_payment(user_input):
     museum = extract_details(user_input, "museum name")
     date = extract_details(user_input, "date")
     time_slot = extract_details(user_input, "time slot")
-        
     return "Payment"
 
 def chatbot_response(user_input):
     intent = classify_intent(user_input)
-    
     if intent == "enquiry":
         return handle_enquiry(user_input)
     elif intent == "payment":
@@ -96,6 +100,7 @@ def chatbot_response(user_input):
     else:
         return "I'm not sure how to handle that request."
 
+# Example Query
 # if __name__ == "__main__":
 #     user_input = "I want to enquire about booking tickets for the DEF museum in Agra on September 10th at 10:00 AM."
 #     response = chatbot_response(user_input)
