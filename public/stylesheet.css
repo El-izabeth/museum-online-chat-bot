@@ -1,0 +1,16 @@
+.cl-message.assistant {
+    background-color: #FFFF00; /* Change to your desired background color */
+    border-radius: 8px; 
+    padding: 10px; 
+}
+
+.MuiStack-root css-14k6mw7 {
+    max-height: 50px;
+}
+
+.starter {
+    background-color: #f0f0f0; /* Change this to your desired color */
+    border-radius: 8px; /* Optional: add rounded corners */
+    padding: 10px; /* Optional: add some padding */
+    margin: 5px 0; /* Optional: add margin between starters */
+}
